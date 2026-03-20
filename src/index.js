@@ -49,7 +49,63 @@ function parseBool(v, defaultValue) {
     return String(v).toLowerCase() === 'true';
 }
 
+function parseDeviceConfigsFromBanks() {
+    const keyRegex = /^ROUTER_(\d+)_(ID|NAME|HOST|PORT|TLS|TLS_INSECURE|USER|PASS|DEFAULT_IF|DEBUG)$/;
+    const banks = new Map();
+
+    for (const [key, value] of Object.entries(process.env)) {
+        const m = keyRegex.exec(key);
+        if (!m) continue;
+        const index = parseInt(m[1], 10);
+        const field = m[2];
+        if (!banks.has(index)) banks.set(index, {});
+        banks.get(index)[field] = value;
+    }
+
+    if (!banks.size) return [];
+
+    const ids = new Set();
+    const indexes = Array.from(banks.keys()).sort((a, b) => a - b);
+    const devices = indexes.map((index) => {
+        const b = banks.get(index);
+        const id = String((b.ID || '').trim() || `router-${index}`);
+        if (ids.has(id)) {
+            console.error('[MikroDash] Duplicate router id in ROUTER_<n>_ID:', id);
+            process.exit(1);
+        }
+        ids.add(id);
+
+        const host = (b.HOST || '').trim();
+        const username = (b.USER || '').trim();
+        const password = b.PASS;
+
+        return {
+            id,
+            name: (b.NAME || '').trim() || host || id,
+            host,
+            port: parseInt(String((b.PORT || '').trim() || process.env.ROUTER_PORT || '8729'), 10),
+            tls: b.TLS == null || b.TLS === '' ? parseBool(process.env.ROUTER_TLS, true) : parseBool(b.TLS, true),
+            tlsInsecure: b.TLS_INSECURE == null || b.TLS_INSECURE === '' ? parseBool(process.env.ROUTER_TLS_INSECURE, false) : parseBool(b.TLS_INSECURE, false),
+            username,
+            password,
+            debug: b.DEBUG == null || b.DEBUG === '' ? parseBool(process.env.ROS_DEBUG, false) : parseBool(b.DEBUG, false),
+            defaultIf: (b.DEFAULT_IF || '').trim() || process.env.DEFAULT_IF || 'WAN1',
+        };
+    });
+
+    const missing = devices.filter(d => !d.host || !d.username || d.password == null);
+    if (missing.length) {
+        console.error('[MikroDash] Each ROUTER_<n> bank requires HOST, USER, PASS');
+        process.exit(1);
+    }
+
+    return devices;
+}
+
 function parseDeviceConfigs() {
+    const bankDevices = parseDeviceConfigsFromBanks();
+    if (bankDevices.length) return bankDevices;
+
     const defaultDevice = {
         id: process.env.ROUTER_ID || 'default',
         name: process.env.ROUTER_NAME || process.env.ROUTER_HOST || 'Router',

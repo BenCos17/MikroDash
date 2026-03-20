@@ -98,7 +98,8 @@ Create your `.env` file:
 
 ```bash
 curl -o .env https://raw.githubusercontent.com/SecOps-7/MikroDash/main/.env.example
-# Edit .env — set ROUTER_HOST, ROUTER_USER, ROUTER_PASS, DEFAULT_IF
+# Edit .env — for one router set ROUTER_HOST, ROUTER_USER, ROUTER_PASS.
+# For multiple routers, add ROUTER_1_*, ROUTER_2_* banks (see Environment Variables below).
 ```
 
 Run the container:
@@ -129,7 +130,8 @@ docker compose up -d
 git clone https://github.com/SecOps-7/MikroDash.git
 cd MikroDash
 cp .env.example .env
-# Edit .env — set ROUTER_HOST, ROUTER_USER, ROUTER_PASS, DEFAULT_IF
+# Edit .env — for one router set ROUTER_HOST, ROUTER_USER, ROUTER_PASS.
+# For multiple routers, add ROUTER_1_*, ROUTER_2_* banks (see Environment Variables below).
 docker compose up -d
 ```
 
@@ -170,8 +172,27 @@ DEFAULT_IF=ether1            # Default interface shown in traffic chart
 HISTORY_MINUTES=30           # Traffic chart history window
 
 # Optional: monitor multiple routers in one dashboard
-# When set, this overrides ROUTER_HOST/ROUTER_USER/ROUTER_PASS for runtime connections.
-# Example:
+# Preferred: bank style (easy to edit in .env)
+# ROUTER_1_ID=home
+# ROUTER_1_NAME=Home Router
+# ROUTER_1_HOST=192.168.88.1
+# ROUTER_1_USER=mikrodash
+# ROUTER_1_PASS=secret
+# ROUTER_1_PORT=8728
+# ROUTER_1_TLS=false
+# ROUTER_1_DEFAULT_IF=ether1
+#
+# ROUTER_2_ID=lab
+# ROUTER_2_NAME=Lab Router
+# ROUTER_2_HOST=10.0.0.1
+# ROUTER_2_USER=mikrodash
+# ROUTER_2_PASS=secret
+# ROUTER_2_PORT=8729
+# ROUTER_2_TLS=true
+# ROUTER_2_TLS_INSECURE=true
+# ROUTER_2_DEFAULT_IF=wan
+
+# Legacy: single-line JSON (used when no ROUTER_<n>_* banks are defined)
 # ROUTERS_JSON=[{"id":"home","name":"Home Router","host":"192.168.88.1","port":8728,"tls":false,"username":"mikrodash","password":"secret","defaultIf":"ether1"},{"id":"lab","name":"Lab Router","host":"10.0.0.1","port":8729,"tls":true,"tlsInsecure":true,"username":"mikrodash","password":"secret","defaultIf":"wan"}]
 ROUTERS_JSON=
 

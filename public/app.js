@@ -361,11 +361,15 @@ socket.on('ifstatus:update', function (data) {
     var dotCls = i.disabled ? 'dis' : i.running ? 'up' : 'down';
     var ipStr = i.ips && i.ips.length ? i.ips[0] : '';
     var rateStr = (i.rxMbps || i.txMbps) ? '\u2193 ' + i.rxMbps + ' \u2191 ' + i.txMbps + ' Mbps' : '';
+    var poeVal = (typeof i.poePowerW === 'number' && !isNaN(i.poePowerW)) ? i.poePowerW.toFixed(1) + ' W' : '—';
+    var poeStatus = i.poeStatus ? ' · ' + esc(i.poeStatus) : '';
+    var poeStr = i.poeCapable ? ('PoE draw: ' + poeVal + poeStatus) : '';
     return '<div class="iface-tile ' + cls + '">' +
       '<div class="iface-name"><span class="iface-dot ' + dotCls + '"></span>' + esc(i.name) + '</div>' +
       '<div class="iface-type">' + esc(i.type) + (i.comment ? ' \u00b7 ' + esc(i.comment) : '') + '</div>' +
       (ipStr ? '<div class="iface-ip">' + esc(ipStr) + '</div>' : '') +
       (rateStr ? '<div class="iface-rate">' + rateStr + '</div>' : '') +
+      (poeStr ? '<div class="iface-poe">' + poeStr + '</div>' : '') +
       '</div>';
   }).join('');
 });
