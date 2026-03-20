@@ -7,22 +7,30 @@ class InterfaceStatusCollector {
   }
 
   buildInterfaceRows(ifaces, ipByIface, poeByIface) {
-    return (ifaces || []).map(i => ({
-      name: i.name || "",
-      type: i.type || "ether",
-      running: i.running === "true" || i.running === true,
-      disabled: i.disabled === "true" || i.disabled === true,
-      comment: i.comment || "",
-      macAddr: i["mac-address"] || "",
-      rxBytes: parseInt(i["rx-byte"] || "0", 10),
-      txBytes: parseInt(i["tx-byte"] || "0", 10),
-      rxMbps: Math.round((parseFloat(i["rx-bits-per-second"] || "0") / 1e6) * 10) / 10,
-      txMbps: Math.round((parseFloat(i["tx-bits-per-second"] || "0") / 1e6) * 10) / 10,
-      ips: ipByIface[i.name] || [],
-      poeCapable: Boolean((poeByIface[i.name] || {}).poeCapable),
-      poeStatus: (poeByIface[i.name] || {}).poeStatus || "",
-      poePowerW: (poeByIface[i.name] || {}).poePowerW,
-    }));
+    return (ifaces || []).map(i => {
+      const key = this.normalizeIfaceName(i.name || "");
+      const poe = poeByIface[key] || {};
+      return {
+        name: i.name || "",
+        type: i.type || "ether",
+        running: i.running === "true" || i.running === true,
+        disabled: i.disabled === "true" || i.disabled === true,
+        comment: i.comment || "",
+        macAddr: i["mac-address"] || "",
+        rxBytes: parseInt(i["rx-byte"] || "0", 10),
+        txBytes: parseInt(i["tx-byte"] || "0", 10),
+        rxMbps: Math.round((parseFloat(i["rx-bits-per-second"] || "0") / 1e6) * 10) / 10,
+        txMbps: Math.round((parseFloat(i["tx-bits-per-second"] || "0") / 1e6) * 10) / 10,
+        ips: ipByIface[i.name] || [],
+        poeCapable: Boolean(poe.poeCapable),
+        poeStatus: poe.poeStatus || "",
+        poePowerW: poe.poePowerW,
+      };
+    });
+  }
+
+  normalizeIfaceName(name) {
+    return String(name || "").trim().toLowerCase();
   }
 
   parsePoePowerWatts(entry) {
@@ -67,8 +75,8 @@ class InterfaceStatusCollector {
     const byIface = {};
     for (const p of (poeItems || [])) {
       if (!p || typeof p !== "object") continue;
-      const name = p.interface || p.name || "";
-      if (!name) continue;
+      const key = this.normalizeIfaceName(p.interface || p.name || "");
+      if (!key) continue;
       const powerW = this.parsePoePowerWatts(p);
       const status = String(p["poe-out-status"] || p.status || "").toLowerCase();
       const rawPoeOut = String(p["poe-out"] || "").toLowerCase();
@@ -86,10 +94,22 @@ class InterfaceStatusCollector {
         (hasPoeSignal && !statusMarksUnsupported) ||
         powerW != null ||
         (!!rawPoeOut && rawPoeOut !== "none");
-      byIface[name] = {
+      const next = {
         poeCapable: isPoECapable,
         poeStatus: status,
         poePowerW: powerW,
+      };
+
+      const prev = byIface[key];
+      if (!prev) {
+        byIface[key] = next;
+        continue;
+      }
+
+      byIface[key] = {
+        poeCapable: prev.poeCapable || next.poeCapable,
+        poeStatus: next.poeStatus || prev.poeStatus,
+        poePowerW: next.poePowerW != null ? next.poePowerW : prev.poePowerW,
       };
     }
     return byIface;
@@ -97,14 +117,17 @@ class InterfaceStatusCollector {
 
   async tick() {
     if (!this.ros.connected) return;
-    const [ifRes, addrRes, poeRes] = await Promise.allSettled([
+    const [ifRes, addrRes, poeRes, ethRes] = await Promise.allSettled([
       this.ros.write("/interface/print", ["=stats="]),
       this.ros.write("/ip/address/print"),
       this.ros.write("/interface/ethernet/poe/print"),
+      this.ros.write("/interface/ethernet/print"),
     ]);
     const ifaces = ifRes.status === "fulfilled" ? (ifRes.value || []) : [];
     const addrs = addrRes.status === "fulfilled" ? (addrRes.value || []) : [];
-    const poeItems = poeRes.status === "fulfilled" ? (poeRes.value || []) : [];
+    const poeItems = [];
+    if (poeRes.status === "fulfilled") poeItems.push(...(poeRes.value || []));
+    if (ethRes.status === "fulfilled") poeItems.push(...(ethRes.value || []));
     const poeByIface = this.buildPoeByIface(poeItems);
     const ipByIface = {};
     for (const a of addrs) {
