@@ -2,35 +2,6 @@ class InterfaceStatusCollector {
   constructor({ ros, io, pollMs, state }) {
     this.ros = ros; this.io = io; this.pollMs = pollMs || 5000;
     this.state = state; this.timer = null;
-    this.lastGoodInterfaces = [];
-    this.lastGoodCount = 0;
-  }
-
-  buildInterfaceRows(ifaces, ipByIface, poeByIface) {
-    return (ifaces || []).map(i => {
-      const key = this.normalizeIfaceName(i.name || "");
-      const poe = poeByIface[key] || {};
-      return {
-        name: i.name || "",
-        type: i.type || "ether",
-        running: i.running === "true" || i.running === true,
-        disabled: i.disabled === "true" || i.disabled === true,
-        comment: i.comment || "",
-        macAddr: i["mac-address"] || "",
-        rxBytes: parseInt(i["rx-byte"] || "0", 10),
-        txBytes: parseInt(i["tx-byte"] || "0", 10),
-        rxMbps: Math.round((parseFloat(i["rx-bits-per-second"] || "0") / 1e6) * 10) / 10,
-        txMbps: Math.round((parseFloat(i["tx-bits-per-second"] || "0") / 1e6) * 10) / 10,
-        ips: ipByIface[i.name] || [],
-        poeCapable: Boolean(poe.poeCapable),
-        poeStatus: poe.poeStatus || "",
-        poePowerW: poe.poePowerW,
-      };
-    });
-  }
-
-  normalizeIfaceName(name) {
-    return String(name || "").trim().toLowerCase();
   }
 
   parsePoePowerWatts(entry) {
@@ -75,8 +46,8 @@ class InterfaceStatusCollector {
     const byIface = {};
     for (const p of (poeItems || [])) {
       if (!p || typeof p !== "object") continue;
-      const key = this.normalizeIfaceName(p.interface || p.name || "");
-      if (!key) continue;
+      const name = p.interface || p.name || "";
+      if (!name) continue;
       const powerW = this.parsePoePowerWatts(p);
       const status = String(p["poe-out-status"] || p.status || "").toLowerCase();
       const rawPoeOut = String(p["poe-out"] || "").toLowerCase();
@@ -94,22 +65,10 @@ class InterfaceStatusCollector {
         (hasPoeSignal && !statusMarksUnsupported) ||
         powerW != null ||
         (!!rawPoeOut && rawPoeOut !== "none");
-      const next = {
+      byIface[name] = {
         poeCapable: isPoECapable,
         poeStatus: status,
         poePowerW: powerW,
-      };
-
-      const prev = byIface[key];
-      if (!prev) {
-        byIface[key] = next;
-        continue;
-      }
-
-      byIface[key] = {
-        poeCapable: prev.poeCapable || next.poeCapable,
-        poeStatus: next.poeStatus || prev.poeStatus,
-        poePowerW: next.poePowerW != null ? next.poePowerW : prev.poePowerW,
       };
     }
     return byIface;
@@ -117,17 +76,14 @@ class InterfaceStatusCollector {
 
   async tick() {
     if (!this.ros.connected) return;
-    const [ifRes, addrRes, poeRes, ethRes] = await Promise.allSettled([
+    const [ifRes, addrRes, poeRes] = await Promise.allSettled([
       this.ros.write("/interface/print", ["=stats="]),
       this.ros.write("/ip/address/print"),
       this.ros.write("/interface/ethernet/poe/print"),
-      this.ros.write("/interface/ethernet/print"),
     ]);
     const ifaces = ifRes.status === "fulfilled" ? (ifRes.value || []) : [];
     const addrs = addrRes.status === "fulfilled" ? (addrRes.value || []) : [];
-    const poeItems = [];
-    if (poeRes.status === "fulfilled") poeItems.push(...(poeRes.value || []));
-    if (ethRes.status === "fulfilled") poeItems.push(...(ethRes.value || []));
+    const poeItems = poeRes.status === "fulfilled" ? (poeRes.value || []) : [];
     const poeByIface = this.buildPoeByIface(poeItems);
     const ipByIface = {};
     for (const a of addrs) {
@@ -135,38 +91,22 @@ class InterfaceStatusCollector {
       if (!ipByIface[n]) ipByIface[n] = [];
       ipByIface[n].push(a.address || "");
     }
-
-    let interfaces = this.buildInterfaceRows(ifaces, ipByIface, poeByIface);
-    const previousCount = this.lastGoodCount;
-    const suspiciousDrop = previousCount >= 6 && interfaces.length > 0 && interfaces.length <= Math.max(1, Math.floor(previousCount / 4));
-
-    if (suspiciousDrop) {
-      try {
-        const fallbackIfaces = await this.ros.write("/interface/print");
-        const byName = new Map((ifaces || []).map(i => [i.name || "", i]));
-        const merged = (fallbackIfaces || []).map((base) => {
-          const stats = byName.get(base.name || "") || {};
-          return { ...base, ...stats };
-        });
-        interfaces = this.buildInterfaceRows(merged, ipByIface, poeByIface);
-      } catch (_) {
-        // keep current interfaces from stats call
-      }
-    }
-
-    const stillSuspicious = previousCount >= 6 && interfaces.length > 0 && interfaces.length <= Math.max(1, Math.floor(previousCount / 4));
-    if (interfaces.length === 0 || stillSuspicious) {
-      if (this.lastGoodInterfaces.length) {
-        console.warn("[ifstatus] ignoring partial interface snapshot", {
-          received: interfaces.length,
-          previous: previousCount,
-        });
-        return;
-      }
-    }
-
-    this.lastGoodInterfaces = interfaces;
-    this.lastGoodCount = interfaces.length;
+    const interfaces = ifaces.map(i => ({
+      name: i.name || "",
+      type: i.type || "ether",
+      running: i.running === "true" || i.running === true,
+      disabled: i.disabled === "true" || i.disabled === true,
+      comment: i.comment || "",
+      macAddr: i["mac-address"] || "",
+      rxBytes: parseInt(i["rx-byte"] || "0", 10),
+      txBytes: parseInt(i["tx-byte"] || "0", 10),
+      rxMbps: Math.round((parseFloat(i["rx-bits-per-second"] || "0") / 1e6) * 10) / 10,
+      txMbps: Math.round((parseFloat(i["tx-bits-per-second"] || "0") / 1e6) * 10) / 10,
+      ips: ipByIface[i.name] || [],
+      poeCapable: Boolean((poeByIface[i.name] || {}).poeCapable),
+      poeStatus: (poeByIface[i.name] || {}).poeStatus || "",
+      poePowerW: (poeByIface[i.name] || {}).poePowerW,
+    }));
     this.io.emit("ifstatus:update", { ts: Date.now(), interfaces });
     this.state.lastIfStatusTs = Date.now();
   }
